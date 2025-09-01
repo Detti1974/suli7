@@ -7,6 +7,9 @@ import lessons from "../data/lessons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AnimateWord from "../components/AnimateWord";
 
+// TÖRI adatforrás (7. osztály)
+import { tortenelem7, type Lesson as HistoryLesson } from "../data/lessons/tortenelem/tortenelem7";
+
 type R = RouteProp<RootStackParamList, "Lesson">;
 type Nav = NativeStackNavigationProp<RootStackParamList, "Lesson">;
 
@@ -42,6 +45,31 @@ function RichText({ text, baseStyle, size }: { text: string; baseStyle: any; siz
   );
 }
 
+/** TÖRI → NYELVTAN blokk adapter (HistoryLesson[] ⇒ {title, blocks}) */
+function adaptHistoryTopic(topicId: string) {
+  const topic = tortenelem7.topics.find((t) => t.id === topicId);
+  if (!topic) return null;
+
+  // történelmi lecke -> „block”
+  const blocks: Array<{ heading?: string; text?: string }> = [];
+  (topic.lessons as HistoryLesson[]).forEach((l) => {
+    if (l.title || l.content) {
+      blocks.push({ heading: l.title, text: l.content });
+    }
+    if (l.keyDates && l.keyDates.length) {
+      blocks.push({
+        heading: "Fontos évszámok",
+        text: l.keyDates.map((d) => `${d.year}: ${d.event}`).join("\n"),
+      });
+    }
+  });
+
+  return {
+    title: topic.title,
+    blocks,
+  };
+}
+
 export default function LessonScreen() {
   const route = useRoute<R>();
   const nav = useNavigation<Nav>();
@@ -52,7 +80,14 @@ export default function LessonScreen() {
     nav.setOptions({ title: title ?? "Tananyag" });
   }, [nav, title]);
 
-  const lesson = useMemo(() => (lessons as Record<string, any>)[topicId], [topicId]);
+  // 1) nyelvtan formátum próbálkozás (régi struktúra)
+  // 2) ha nincs, akkor történelem-adapter
+  const lesson = useMemo(() => {
+    const byGrammar = (lessons as Record<string, any>)[topicId];
+    if (byGrammar) return byGrammar;
+    const byHistory = adaptHistoryTopic(topicId);
+    return byHistory;
+  }, [topicId]);
 
   if (!lesson) {
     return (
@@ -96,7 +131,7 @@ const styles = StyleSheet.create({
   inlineRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "baseline" },
   h1: { fontSize: 22, fontWeight: "700", marginBottom: 4 },
   block: { marginBottom: 8 },
-  heading: { fontSize: 18, fontWeight: "600", marginBottom: 6 },
+  heading: { fontSize: 18, fontWeight: "600", marginBottom: 6, color: "#065f46" }, // emerald-800
   p: { fontSize: 16, lineHeight: 22 },
   example: { fontSize: 15, fontStyle: "italic", marginTop: 6, color: "#333" },
   tip: { fontSize: 15, marginTop: 6, color: "#2e7d32" },

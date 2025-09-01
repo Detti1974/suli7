@@ -1,32 +1,49 @@
 import React, { useMemo, useState, useLayoutEffect, useCallback, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import quizzes from "../data/quizzes";
 import { pickRandom } from "../utils/random";
 
+// <<< FONTOS: innen szedd az összefűzött történelem témazárókat >>>
+import { exams } from "../data/exams/tortenelem";
+
+// ---- normalizáló a különböző sémákhoz ----
 type TF = { type: "tf"; text: string; answer: boolean; hint?: string };
 type MC = { type: "mc"; text: string; options: string[]; correctIndex: number; hint?: string };
-type RawQuestion = TF | MC;
+type RawGrammar = TF | MC;
+type RawHistory = { question: string; options: string[]; correct: number; hint?: string };
 type Normalized = { question: string; options: string[]; correctIndex: number; hint?: string };
 
-type RouteParams = { quizId: string; title?: string; count?: number };
+function normalizeItem(q: any): Normalized {
+  const g = q as RawGrammar;
+  if (g?.type === "mc") return { question: g.text, options: g.options, correctIndex: g.correctIndex, hint: g.hint };
+  if (g?.type === "tf")  return { question: g.text, options: ["Igaz", "Hamis"], correctIndex: g.answer ? 0 : 1, hint: g.hint };
 
-function normalize(q: RawQuestion): Normalized {
-  if (q.type === "mc") return { question: q.text, options: q.options, correctIndex: q.correctIndex, hint: q.hint };
-  return { question: q.text, options: ["Igaz", "Hamis"], correctIndex: q.answer ? 0 : 1, hint: q.hint };
+  const h = q as RawHistory;
+  if (typeof h?.question === "string" && Array.isArray(h?.options) && typeof h?.correct === "number") {
+    return { question: h.question, options: h.options, correctIndex: h.correct, hint: h.hint };
+  }
+
+  // fallback
+  const question = q?.question ?? q?.text ?? "";
+  const options = q?.options ?? [];
+  const correctIndex =
+    typeof q?.correctIndex === "number" ? q.correctIndex :
+    typeof q?.correct === "number" ? q.correct : 0;
+  return { question, options, correctIndex, hint: q?.hint };
 }
 
 export default function ExamScreen() {
   const route = useRoute<any>();
   const nav = useNavigation<any>();
-  const { quizId, title, count = 10 } = route.params as RouteParams;
+  const { examId, title, count = 10 } = (route.params || {}) as { examId: string; title?: string; count?: number };
 
-  const bank = quizzes[quizId];
-  const pool: Normalized[] = useMemo(() => (bank?.questions ?? []).map(normalize), [bank]);
+  const bank: any = exams[examId];
+  const pool: Normalized[] = useMemo(() => {
+    const src = Array.isArray(bank?.items) ? bank.items : Array.isArray(bank?.questions) ? bank.questions : [];
+    return src.map(normalizeItem).filter((x: Normalized) => x?.question && x?.options?.length >= 2);
+  }, [bank]);
 
-  const [questions, setQuestions] = useState<Normalized[]>(() =>
-    pickRandom(pool, Math.min(count, pool.length))
-  );
+  const [questions, setQuestions] = useState<Normalized[]>(() => pickRandom(pool, Math.min(count, pool.length)));
   const [idx, setIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<number, number | null>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -35,7 +52,6 @@ export default function ExamScreen() {
     nav.setOptions({ title: title ?? bank?.title ?? "Témazáró" });
   }, [nav, title, bank?.title]);
 
-  // ha változik a quizId vagy count, új kérdéssort húzunk
   useEffect(() => {
     if (pool.length > 0) {
       setQuestions(pickRandom(pool, Math.min(count, pool.length)));
@@ -43,7 +59,7 @@ export default function ExamScreen() {
       setAnswers({});
       setSubmitted(false);
     }
-  }, [quizId, pool, count]);
+  }, [examId, pool, count]);
 
   const restart = useCallback(() => {
     setQuestions(pickRandom(pool, Math.min(count, pool.length)));
@@ -55,12 +71,13 @@ export default function ExamScreen() {
   if (!bank || pool.length === 0) {
     return (
       <View style={styles.center}>
-        <Text>Nincs kérdés ehhez a témához.</Text>
+        <Text>Nincs kérdés ehhez a témazáróhoz (ellenőrizd az examId-t).</Text>
       </View>
     );
   }
 
   const q = questions[idx];
+
   const pick = (i: number) => {
     if (submitted) return;
     setAnswers((a) => ({ ...a, [idx]: i }));
@@ -82,21 +99,15 @@ export default function ExamScreen() {
   return (
     <ScrollView contentContainerStyle={{ padding: 16 }}>
       <Text style={styles.heading}>{title ?? bank.title}</Text>
-      <Text style={styles.subhead}>
-        Kérdés {idx + 1} / {questions.length}
-      </Text>
+      <Text style={styles.subhead}>Kérdés {idx + 1} / {questions.length}</Text>
 
-      {!submitted && (
+      {!submitted ? (
         <>
           <Text style={styles.title}>{q.question}</Text>
           {q.options.map((opt, i) => {
             const isPicked = answers[idx] === i;
             return (
-              <TouchableOpacity
-                key={i}
-                style={[styles.option, isPicked && styles.optionPicked]}
-                onPress={() => pick(i)}
-              >
+              <TouchableOpacity key={i} style={[styles.option, isPicked && styles.optionPicked]} onPress={() => pick(i)}>
                 <Text style={styles.optText}>{opt}</Text>
               </TouchableOpacity>
             );
@@ -106,6 +117,7 @@ export default function ExamScreen() {
             <TouchableOpacity onPress={prev} style={[styles.navBtn, idx === 0 && styles.navBtnDisabled]} disabled={idx === 0}>
               <Text style={styles.navText}>Előző</Text>
             </TouchableOpacity>
+
             {idx < questions.length - 1 ? (
               <TouchableOpacity onPress={next} style={styles.navBtn}>
                 <Text style={styles.navText}>Következő</Text>
@@ -117,9 +129,7 @@ export default function ExamScreen() {
             )}
           </View>
         </>
-      )}
-
-      {submitted && (
+      ) : (
         <View style={styles.resultCard}>
           <Text style={styles.resultTitle}>Eredmény</Text>
           <Text style={styles.score}>{score} / {questions.length} pont</Text>
@@ -177,5 +187,5 @@ const styles = StyleSheet.create({
   bad: { color: "#b3261e" },
   hint: { color: "#444", marginTop: 2 },
   buttonDark: { backgroundColor: "#0b1220", borderRadius: 14, paddingVertical: 14, alignItems: "center", marginTop: 12 },
-  buttonText: { color: "white", fontSize: 18, fontWeight: "800" }
+  buttonText: { color: "white", fontSize: 18, fontWeight: "800" },
 });
